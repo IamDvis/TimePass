@@ -10,11 +10,12 @@ from pytgcalls.exceptions import (
     AlreadyJoinedError,
     NoActiveGroupCall,
     TelegramServerError,
+    GroupCallNotFound,
 )
 from pytgcalls.types import Update
 from pytgcalls.types.input_stream import AudioPiped, AudioVideoPiped
 from pytgcalls.types.input_stream.quality import HighQualityAudio, MediumQualityVideo
-from pytgcalls.types.stream import StreamAudioEnded
+from pytgcalls.types.messages import StreamAudioEnded
 
 import config
 from AnonXMusic import LOGGER, YouTube, app
@@ -52,50 +53,39 @@ class Call(PyTgCalls):
             api_hash=config.API_HASH,
             session_string=str(config.STRING1),
         )
-        self.one = PyTgCalls(
-            self.userbot1,
-            cache_duration=100,
-        )
+        self.one = PyTgCalls(self.userbot1)
+
         self.userbot2 = Client(
             name="AnonXAss2",
             api_id=config.API_ID,
             api_hash=config.API_HASH,
             session_string=str(config.STRING2),
         )
-        self.two = PyTgCalls(
-            self.userbot2,
-            cache_duration=100,
-        )
+        self.two = PyTgCalls(self.userbot2)
+
         self.userbot3 = Client(
             name="AnonXAss3",
             api_id=config.API_ID,
             api_hash=config.API_HASH,
             session_string=str(config.STRING3),
         )
-        self.three = PyTgCalls(
-            self.userbot3,
-            cache_duration=100,
-        )
+        self.three = PyTgCalls(self.userbot3)
+
         self.userbot4 = Client(
             name="AnonXAss4",
             api_id=config.API_ID,
             api_hash=config.API_HASH,
             session_string=str(config.STRING4),
         )
-        self.four = PyTgCalls(
-            self.userbot4,
-            cache_duration=100,
-        )
+        self.four = PyTgCalls(self.userbot4)
+
         self.userbot5 = Client(
             name="AnonXAss5",
             api_id=config.API_ID,
             api_hash=config.API_HASH,
             session_string=str(config.STRING5),
         )
-        self.five = PyTgCalls(
-            self.userbot5,
-            cache_duration=100,
-        )
+        self.five = PyTgCalls(self.userbot5)
 
     async def pause_stream(self, chat_id: int):
         assistant = await group_assistant(self, chat_id)
@@ -110,53 +100,49 @@ class Call(PyTgCalls):
         try:
             await clear(chat_id)
             await assistant.leave_group_call(chat_id)
-        except:
+        except GroupCallNotFound:
+            pass
+        except Exception as e:
+            LOGGER(__name__).error(f"Error stopping stream in chat {chat_id}: {e}")
             pass
 
     async def stop_stream_force(self, chat_id: int):
-        try:
-            if config.STRING1:
-                await self.one.leave_group_call(chat_id)
-        except:
-            pass
-        try:
-            if config.STRING2:
-                await self.two.leave_group_call(chat_id)
-        except:
-            pass
-        try:
-            if config.STRING3:
-                await self.three.leave_group_call(chat_id)
-        except:
-            pass
-        try:
-            if config.STRING4:
-                await self.four.leave_group_call(chat_id)
-        except:
-            pass
-        try:
-            if config.STRING5:
-                await self.five.leave_group_call(chat_id)
-        except:
-            pass
+        assistants = [self.one, self.two, self.three, self.four, self.five]
+        for idx, assistant in enumerate(assistants):
+            if getattr(config, f"STRING{idx+1}"):
+                try:
+                    await assistant.leave_group_call(chat_id)
+                except GroupCallNotFound:
+                    pass
+                except Exception as e:
+                    LOGGER(__name__).error(f"Error force stopping stream with assistant {idx+1} in chat {chat_id}: {e}")
+                    pass
         try:
             await clear(chat_id)
-        except:
+        except Exception as e:
+            LOGGER(__name__).error(f"Error clearing chat data for {chat_id}: {e}")
             pass
-
 
     async def force_stop_stream(self, chat_id: int):
         assistant = await group_assistant(self, chat_id)
         try:
             check = db.get(chat_id)
-            check.pop(0)
-        except:
+            if check:
+                check.pop(0)
+        except IndexError:
             pass
+        except Exception as e:
+            LOGGER(__name__).error(f"Error popping from db for chat {chat_id}: {e}")
+            pass
+
         await remove_active_video_chat(chat_id)
         await remove_active_chat(chat_id)
         try:
             await assistant.leave_group_call(chat_id)
-        except:
+        except GroupCallNotFound:
+            pass
+        except Exception as e:
+            LOGGER(__name__).error(f"Error leaving group call in force stop for chat {chat_id}: {e}")
             pass
 
     async def skip_stream(
@@ -175,6 +161,7 @@ class Call(PyTgCalls):
             )
         else:
             stream = AudioPiped(link, audio_parameters=HighQualityAudio())
+        
         await assistant.change_stream(
             chat_id,
             stream,
@@ -187,26 +174,29 @@ class Call(PyTgCalls):
                 file_path,
                 audio_parameters=HighQualityAudio(),
                 video_parameters=MediumQualityVideo(),
-                additional_ffmpeg_parameters=f"-ss {to_seek} -to {duration}",
+                additional_ffmpeg_parameters=f"-ss {to_seek}"
             )
             if mode == "video"
             else AudioPiped(
                 file_path,
                 audio_parameters=HighQualityAudio(),
-                additional_ffmpeg_parameters=f"-ss {to_seek} -to {duration}",
+                additional_ffmpeg_parameters=f"-ss {to_seek}"
             )
         )
         await assistant.change_stream(chat_id, stream)
 
     async def stream_call(self, link):
         assistant = await group_assistant(self, config.LOGGER_ID)
-        await assistant.join_group_call(
-            config.LOGGER_ID,
-            AudioVideoPiped(link),
-            stream_type=StreamType().pulse_stream,
-        )
-        await asyncio.sleep(0.2)
-        await assistant.leave_group_call(config.LOGGER_ID)
+        try:
+            await assistant.join_group_call(
+                config.LOGGER_ID,
+                AudioVideoPiped(link),
+            )
+            await asyncio.sleep(0.2)
+            await assistant.leave_group_call(config.LOGGER_ID)
+        except Exception as e:
+            LOGGER(__name__).error(f"Error in stream_call for {link}: {e}")
+            raise
 
     async def join_call(
         self,
@@ -224,20 +214,12 @@ class Call(PyTgCalls):
                 video_parameters=MediumQualityVideo(),
             )
         else:
-            stream = (
-                AudioVideoPiped(
-                    link,
-                    audio_parameters=HighQualityAudio(),
-                    video_parameters=MediumQualityVideo(),
-                )
-                if video
-                else AudioPiped(link, audio_parameters=HighQualityAudio())
-            )
+            stream = AudioPiped(link, audio_parameters=HighQualityAudio())
+        
         try:
             await assistant.join_group_call(
                 chat_id,
                 stream,
-                stream_type=StreamType().pulse_stream,
             )
         except NoActiveGroupCall:
             raise AssistantErr("📹 No active video chat found.\nPlease start a video chat in your group or channel and try again.")
@@ -245,6 +227,10 @@ class Call(PyTgCalls):
             raise AssistantErr("⚠️ Assistant is already in a video chat.\n\nIf it's not, please use /reboot and try playing again.")
         except TelegramServerError:
             raise AssistantErr("⚠️ Telegram seems to be facing some internal issues.\n\nPlease try again shortly or restart the video chat in your group.")
+        except Exception as e:
+            LOGGER(__name__).error(f"Error joining call in chat {chat_id}: {e}")
+            raise AssistantErr(f"An unexpected error occurred while joining the call: {e}")
+
         await add_active_chat(chat_id)
         await music_on(chat_id)
         if video:
@@ -261,19 +247,31 @@ class Call(PyTgCalls):
         loop = await get_loop(chat_id)
         try:
             if loop == 0:
-                popped = check.pop(0)
+                if check: 
+                    popped = check.pop(0)
+                else:
+                    LOGGER(__name__).warning(f"No tracks in queue for chat {chat_id}. Clearing and leaving call.")
+                    await clear(chat_id)
+                    return await client.leave_group_call(chat_id)
             else:
                 loop = loop - 1
             await set_loop(chat_id, loop)
-            await auto_clean(popped)
+            if popped:
+                await auto_clean(popped)
             if not check:
                 await clear(chat_id)
                 return await client.leave_group_call(chat_id)
-        except:
+        except IndexError:
+            LOGGER(__name__).warning(f"Queue is empty for chat {chat_id}. Clearing and leaving call.")
+            await clear(chat_id)
+            return await client.leave_group_call(chat_id)
+        except Exception as e:
+            LOGGER(__name__).error(f"Error in change_stream queue handling for chat {chat_id}: {e}")
             try:
                 await clear(chat_id)
                 return await client.leave_group_call(chat_id)
-            except:
+            except Exception as inner_e:
+                LOGGER(__name__).error(f"Error during fallback leave_group_call for chat {chat_id}: {inner_e}")
                 return
         else:
             queued = check[0]["file"]
@@ -290,6 +288,7 @@ class Call(PyTgCalls):
                 db[chat_id][0]["speed_path"] = None
                 db[chat_id][0]["speed"] = 1.0
             video = True if str(streamtype) == "video" else False
+            
             if "live_" in queued:
                 n, link = await YouTube.video(videoid, True)
                 if n == 0:
@@ -310,7 +309,8 @@ class Call(PyTgCalls):
                     )
                 try:
                     await client.change_stream(chat_id, stream)
-                except Exception:
+                except Exception as e:
+                    LOGGER(__name__).error(f"Error changing live stream for chat {chat_id}: {e}")
                     return await app.send_message(
                         original_chat_id,
                         text="Failed to switch stream, please use /skip to change the track again.",
@@ -334,7 +334,8 @@ class Call(PyTgCalls):
                         videoid=True,
                         video=True if str(streamtype) == "video" else False,
                     )
-                except:
+                except Exception as e:
+                    LOGGER(__name__).error(f"Error downloading video for chat {chat_id}: {e}")
                     return await mystic.edit_text(
                         "Failed to switch stream, please use /skip to change the track again.", disable_web_page_preview=True
                     )
@@ -351,7 +352,8 @@ class Call(PyTgCalls):
                     )
                 try:
                     await client.change_stream(chat_id, stream)
-                except:
+                except Exception as e:
+                    LOGGER(__name__).error(f"Error changing video stream for chat {chat_id}: {e}")
                     return await app.send_message(
                         original_chat_id,
                         text="Failed to switch stream, please use /skip to change the track again.",
@@ -379,7 +381,8 @@ class Call(PyTgCalls):
                 )
                 try:
                     await client.change_stream(chat_id, stream)
-                except:
+                except Exception as e:
+                    LOGGER(__name__).error(f"Error changing index stream for chat {chat_id}: {e}")
                     return await app.send_message(
                         original_chat_id,
                         text="Failed to switch stream, please use /skip to change the track again.",
@@ -407,7 +410,8 @@ class Call(PyTgCalls):
                     )
                 try:
                     await client.change_stream(chat_id, stream)
-                except:
+                except Exception as e:
+                    LOGGER(__name__).error(f"Error changing local/direct stream for chat {chat_id}: {e}")
                     return await app.send_message(
                         original_chat_id,
                         text="Failed to switch stream, please use /skip to change the track again.",
@@ -448,29 +452,37 @@ class Call(PyTgCalls):
 
     async def ping(self):
         pings = []
-        if config.STRING1:
-            pings.append(await self.one.ping)
-        if config.STRING2:
-            pings.append(await self.two.ping)
-        if config.STRING3:
-            pings.append(await self.three.ping)
-        if config.STRING4:
-            pings.append(await self.four.ping)
-        if config.STRING5:
-            pings.append(await self.five.ping)
-        return str(round(sum(pings) / len(pings), 3))
+        if config.STRING1 and self.one.is_running:
+            pings.append(self.one.ping)
+        if config.STRING2 and self.two.is_running:
+            pings.append(self.two.ping)
+        if config.STRING3 and self.three.is_running:
+            pings.append(self.three.ping)
+        if config.STRING4 and self.four.is_running:
+            pings.append(self.four.ping)
+        if config.STRING5 and self.five.is_running:
+            pings.append(self.five.ping)
+        
+        if pings:
+            return str(round(sum(pings) / len(pings), 3))
+        return "N/A"
 
     async def start(self):
         LOGGER(__name__).info("Starting PyTgCalls Client...\n")
         if config.STRING1:
+            await self.userbot1.start()
             await self.one.start()
         if config.STRING2:
+            await self.userbot2.start()
             await self.two.start()
         if config.STRING3:
+            await self.userbot3.start()
             await self.three.start()
         if config.STRING4:
+            await self.userbot4.start()
             await self.four.start()
         if config.STRING5:
+            await self.userbot5.start()
             await self.five.start()
 
     async def decorators(self):
@@ -503,3 +515,4 @@ class Call(PyTgCalls):
             await self.change_stream(client, update.chat_id)
 
 Anony = Call()
+
