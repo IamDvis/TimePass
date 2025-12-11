@@ -60,22 +60,36 @@ def parse_tg_link(link: str) -> Tuple[Optional[str], Optional[int]]:
     return None, None
 
 
-async def fetch_song(query: str, streamtype: str) -> dict:
-    """API se song/video download link fetch karta hai"""
-    api_url = "http://44.202.188.227:5050/try"
+async def fetch_song(query: str, streamtype: str):
+    api_url = "https://eytapi02-28af26f8c000.herokuapp.com/try"
+    status_url = "https://eytapi02-28af26f8c000.herokuapp.com/status"
+
     vid = "true" if streamtype.lower() == "video" else "false"
     params = {"query": query, "vid": vid}
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, params=params) as response:
-                data = await response.json()
-                print(f"API response: {data}")  # Debug log
-                return data
-    except Exception as e:
-        print(f"API error: {e}")  # Debug log
-        return {"error": str(e)}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(api_url, params=params) as response:
+            data = await response.json()
 
+        if "link" in data:
+            return data
+
+        job_id = data.get("job_id")
+        if not job_id:
+            return {"error": "No job id received"}
+
+        for _ in range(600):
+            await asyncio.sleep(2)
+            async with session.get(status_url, params={"id": job_id}) as r:
+                status_data = await r.json()
+
+            if status_data.get("status") == "done":
+                return {"link": status_data.get("link")}
+
+            if status_data.get("status") == "failed":
+                return {"error": "Download failed"}
+
+        return {"error": "Timeout waiting for song"}
 
 async def download_tg_media(tg_link: str) -> Optional[str]:
     """TG link se media download karta hai locally"""
